@@ -1,3 +1,4 @@
 """Python snippets"""
 
-__all__ = ["unsupervised"]
+__all__ = ["debugging",
+           "unsupervised"]

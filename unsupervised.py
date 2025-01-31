@@ -1,8 +1,8 @@
+__all__ = ["mail_traceback_wrapper"]
+
 from email.message import EmailMessage
 import smtplib
 import traceback
-
-__all__ = ["mail_traceback_wrapper"]
 
 
 def mail_traceback_wrapper(to_address: str,
