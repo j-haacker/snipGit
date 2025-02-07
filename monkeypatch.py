@@ -66,7 +66,7 @@ def monkeypatch(dictlist: list[dict]):
                 continue
             elif verdict == "raise":
                 raise
-            else:
+            elif verdict == "warn":
                 warnings.warn(f"Patch not meant for {d["module"]} version {d["version"]}.")
         d.update({"original": getattr(d["module"], d["target"])})
         setattr(d["module"], d["target"], d["replacement"])
