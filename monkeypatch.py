@@ -2,6 +2,7 @@ __all__ = ["gatekeeper",
            "monkeypatch"]
 
 from contextlib import contextmanager
+from packaging.version import Version
 import warnings
 
 
@@ -28,7 +29,7 @@ def gatekeeper(module_version: str, rules: list[dict]):
     for rule in rules:
         if rule["comperator"](Version(module_version), Version(rule["version"])):
             return rule["action"]
-            
+
 
 @contextmanager
 def monkeypatch(dictlist: list[dict]):
@@ -61,7 +62,7 @@ def monkeypatch(dictlist: list[dict]):
     """
     for d in dictlist:
         if "rules" in d:
-            verdict = patch_gatekeeper(d["version"], d["rules"])
+            verdict = gatekeeper(d["version"], d["rules"])
             if verdict == "skip":
                 continue
             elif verdict == "raise":
