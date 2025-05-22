@@ -1,0 +1,14 @@
+[build-system]
+requires = ["flit_core >=3.11,<4"]
+build-backend = "flit_core.buildapi"
+
+[project]
+name = "snippets"
+authors = [{name = "Jan", email = "152862650+j-haacker@users.noreply.github.com"}]
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+dynamic = ["version", "description"]
+
+[project.urls]
+Home = "https://gist.github.com/j-haacker/5c56a12f35faa3d2b4e3667236356f72"
