@@ -5,14 +5,14 @@ import smtplib
 import traceback
 
 
-def mail_traceback_wrapper(to_address: str,
-                           subject_tag: str = None,
-                           from_address: str = None):
+def mail_traceback_wrapper(
+    to_address: str, subject_tag: str = None, from_address: str = None
+):
     # CREDIT: FBruzzesi, Nathan Davis https://stackoverflow.com/a/27500036
     def decorate(f):
         def applicator(*args, **kwargs):
             try:
-                return f(*args,**kwargs)
+                return f(*args, **kwargs)
             except Exception as err:
                 msg = EmailMessage()
                 msg["To"] = to_address
@@ -27,5 +27,7 @@ def mail_traceback_wrapper(to_address: str,
                 with smtplib.SMTP("localhost") as s:
                     s.send_message(msg)
                 raise
+
         return applicator
+
     return decorate

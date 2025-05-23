@@ -1,5 +1,4 @@
-__all__ = ["gatekeeper",
-           "monkeypatch"]
+__all__ = ["gatekeeper", "monkeypatch"]
 
 from contextlib import contextmanager
 from packaging.version import Version
@@ -68,7 +67,9 @@ def monkeypatch(dictlist: list[dict]):
             elif verdict == "raise":
                 raise
             elif verdict == "warn":
-                warnings.warn(f"Patch not meant for {d["module"]} version {d["version"]}.")
+                warnings.warn(
+                    f"Patch not meant for {d['module']} version {d['version']}."
+                )
         d.update({"original": getattr(d["module"], d["target"])})
         setattr(d["module"], d["target"], d["replacement"])
     try:
