@@ -13,5 +13,15 @@ dynamic = ["version", "description"]
 [project.urls]
 Home = "https://gist.github.com/j-haacker/5c56a12f35faa3d2b4e3667236356f72"
 
+[project.optional-dependencies]
+full = [
+    "packaging",
+    "xarray",
+]
+dev = [
+    "flit",
+    "ruff",
+]
+
 [tool.ruff.lint]
 select = ["E", "F"]
