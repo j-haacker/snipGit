@@ -9,6 +9,7 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 dynamic = ["version", "description"]
+classifiers = ["Private :: Do Not Upload"]
 
 [project.urls]
 Home = "https://gist.github.com/j-haacker/5c56a12f35faa3d2b4e3667236356f72"
@@ -19,9 +20,10 @@ full = [
     "xarray",
 ]
 dev = [
-    "flit",
     "ruff",
+    "uv",
 ]
+all = ["snippets[full,dev]"]
 
 [tool.ruff.lint]
 select = ["E", "F"]
