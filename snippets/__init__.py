@@ -3,11 +3,12 @@
 __version__ = "0.1.0"
 
 __all__ = [
+    "wrap_sys_exit",
+    # modules
     "debugging",
     "monkeypatch",
     "unsupervised",
     "parallel",
-    "wrap_sys_exit",
     "xr_utils",
 ]
 
