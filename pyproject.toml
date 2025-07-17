@@ -12,7 +12,7 @@ dynamic = ["version", "description"]
 classifiers = ["Private :: Do Not Upload"]
 
 [project.urls]
-Home = "https://gist.github.com/j-haacker/5c56a12f35faa3d2b4e3667236356f72"
+Home = "https://github.com/j-haacker/snipGit"
 
 [project.optional-dependencies]
 full = [
