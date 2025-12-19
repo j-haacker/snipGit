@@ -4,6 +4,7 @@ __version__ = "0.1.0"
 
 __all__ = [
     "is_notebook",
+    "precision",
     "wrap_sys_exit",
     # modules
     "debugging",
@@ -14,6 +15,7 @@ __all__ = [
 ]
 
 from contextlib import contextmanager
+import numpy as np
 from sys import exit
 
 
@@ -31,6 +33,25 @@ def is_notebook() -> bool:
             return False  # Other type (?)
     except NameError:
         return False      # Probably standard Python interpreter
+
+
+def precision(uncertainty: float) -> int:
+    """Calculate number of digits to state
+
+    Use for formating numbers, e.g., in print statements.
+
+    .. code-block:: python
+        :caption: Example
+
+        print(f"{value:.{precision(uncertainty)}f}")
+
+    Args:
+        uncertainty (float): Uncertainty estimate.
+
+    Returns:
+        int: Number of "significant" decimal digits.
+    """
+    return max(0, round(1 - np.log10(uncertainty)))
 
 
 @contextmanager
