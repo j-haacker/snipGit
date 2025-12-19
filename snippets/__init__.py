@@ -34,7 +34,7 @@ def is_notebook() -> bool:
 
 
 @contextmanager
-def wrap_sys_exit(code_dict: set[tuple[Exception,int]] = None):
+def wrap_sys_exit(code_dict: set[tuple[Exception,int]] | None = None):
     try:
         yield
     except Exception as err:
