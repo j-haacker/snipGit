@@ -22,14 +22,14 @@ def get_chunk_number(ds, dim, coords):
     def _inner(coord):
         if coord < ds[dim][0] or coord > ds[dim][-1]:
             return None
-        return (ds[dim].isel({dim: np.cumsum(ds.chunks[dim]) - 1}) <= coord).argmin().item(0)
+        return (ds[dim].isel({dim: np.cumsum(ds.chunks[ds.dims.index(dim)]) - 1}) <= coord).argmin().item(0)
     if isinstance(coords, Iterable):
         return [_inner(coord) for coord in coords]
     return _inner(coords)
 
 
 def sel_chunks_by_number_range(ds, dim, start, stop):
-    chunk_borders = np.cumsum([0] + list(ds.chunks[dim]))
+    chunk_borders = np.cumsum([0] + list(ds.chunks[ds.dims.index(dim)]))
     return ds.isel({dim: slice(*chunk_borders[[start, stop + 1]])})
 
 
