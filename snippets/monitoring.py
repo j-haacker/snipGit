@@ -1,8 +1,11 @@
 __all__ = ["mail_traceback_wrapper"]
 
+from contextlib import contextmanager
 from email.message import EmailMessage
+from pathlib import Path
 import smtplib
 import traceback
+import sys
 
 
 def mail_traceback_wrapper(
@@ -31,3 +34,10 @@ def mail_traceback_wrapper(
         return applicator
 
     return decorate
+
+
+@contextmanager
+def pipe_output_to_logfile(path: Path | str):
+    with open(path, "a") as lf:
+        sys.stdout = lf
+        sys.stderr = lf
