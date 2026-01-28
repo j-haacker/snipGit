@@ -37,7 +37,11 @@ def mail_traceback_wrapper(
 
 
 @contextmanager
-def pipe_output_to_logfile(path: Path | str):
-    with open(path, "a") as lf:
-        sys.stdout = lf
-        sys.stderr = lf
+def pipe_output_to_logfile(path: Path | str, mode: Literal["a", "w"]):
+    with open(path, mode) as lf:
+        orig_pipes = sys.stderr, sys.stdout
+        sys.stderr = sys.stdout = lf
+        try:
+            yield
+        finally:
+            sys.stderr, sys.stdout = orig_pipes
