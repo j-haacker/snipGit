@@ -5,6 +5,7 @@ from email.message import EmailMessage
 from pathlib import Path
 import smtplib
 import traceback
+from typing import Literal
 import sys
 
 
