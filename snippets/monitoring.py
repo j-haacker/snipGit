@@ -1,8 +1,8 @@
 __all__ = [
-    "append_git_repro_snapshot",
-    "git_reproducibility_context",
+    "append_git_state_snapshot",
+    "git_state_context",
     "mail_traceback_wrapper",
-    "pipe_output_and_git_repro_log",
+    "pipe_output_and_git_state_log",
     "pipe_output_to_logfile",
 ]
 
@@ -233,7 +233,7 @@ def _render_or_empty(text: str) -> str:
     return f"{text}\n"
 
 
-def append_git_repro_snapshot(
+def append_git_state_snapshot(
     log_path: Path | str,
     *,
     section: Literal["START", "END", "POINT"] = "POINT",
@@ -243,7 +243,7 @@ def append_git_repro_snapshot(
     max_diff_bytes: int = 262_144,
     encoding: str = "utf-8",
 ) -> None:
-    """Append git reproducibility metadata to a plain-text logfile.
+    """Append git state metadata to a plain-text logfile.
 
     Args:
         log_path (Path | str): Log file target.
@@ -270,7 +270,7 @@ def append_git_repro_snapshot(
 
     with log_file.open("a", encoding=encoding) as handle:
         handle.write(
-            f"===== GIT REPRO SNAPSHOT [{section}] {timestamp} =====\n"
+            f"===== GIT STATE SNAPSHOT [{section}] {timestamp} =====\n"
         )
         if anchors:
             anchor_text = ", ".join(str(anchor) for anchor in anchors)
@@ -285,7 +285,7 @@ def append_git_repro_snapshot(
                 "WARNING: Snapshot skipped because no valid git repository "
                 "could be resolved.\n"
             )
-            handle.write("===== END GIT REPRO SNAPSHOT =====\n\n")
+            handle.write("===== END GIT STATE SNAPSHOT =====\n\n")
             return
 
         head_ok, head_output, head_error = _run_git(
@@ -365,11 +365,11 @@ def append_git_repro_snapshot(
         handle.write("--- UNSTAGED DIFF START ---\n")
         handle.write(_render_or_empty(unstaged_output))
         handle.write("--- UNSTAGED DIFF END ---\n")
-        handle.write("===== END GIT REPRO SNAPSHOT =====\n\n")
+        handle.write("===== END GIT STATE SNAPSHOT =====\n\n")
 
 
 @contextmanager
-def git_reproducibility_context(
+def git_state_context(
     log_path: Path | str,
     *,
     snapshot_timing: Literal["start", "end", "both"] = "both",
@@ -379,10 +379,10 @@ def git_reproducibility_context(
     max_diff_bytes: int = 262_144,
     encoding: str = "utf-8",
 ):
-    """Context manager that writes START/END git reproducibility snapshots.
+    """Context manager that writes START/END git state snapshots.
 
     Example:
-        with git_reproducibility_context("run.log", snapshot_timing="both"):
+        with git_state_context("run.log", snapshot_timing="both"):
             run_workflow()
     """
     if snapshot_timing not in {"start", "end", "both"}:
@@ -392,7 +392,7 @@ def git_reproducibility_context(
         )
 
     if snapshot_timing in {"start", "both"}:
-        append_git_repro_snapshot(
+        append_git_state_snapshot(
             log_path=log_path,
             section="START",
             repo_dir=repo_dir,
@@ -406,7 +406,7 @@ def git_reproducibility_context(
         yield
     finally:
         if snapshot_timing in {"end", "both"}:
-            append_git_repro_snapshot(
+            append_git_state_snapshot(
                 log_path=log_path,
                 section="END",
                 repo_dir=repo_dir,
@@ -418,7 +418,7 @@ def git_reproducibility_context(
 
 
 @contextmanager
-def pipe_output_and_git_repro_log(
+def pipe_output_and_git_state_log(
     log_path: Path | str,
     mode: Literal["a", "w"] = "a",
     *,
@@ -429,10 +429,10 @@ def pipe_output_and_git_repro_log(
     max_diff_bytes: int = 262_144,
     encoding: str = "utf-8",
 ):
-    """Pipe stdout/stderr and log git reproducibility snapshots in one context.
+    """Pipe stdout/stderr and log git state snapshots in one context.
 
     Example:
-        with pipe_output_and_git_repro_log("run.log", mode="w"):
+        with pipe_output_and_git_state_log("run.log", mode="w"):
             print("workflow started")
             run_workflow()
     """
@@ -444,7 +444,7 @@ def pipe_output_and_git_repro_log(
     if mode == "w":
         log_file.write_text("", encoding=encoding)
 
-    with git_reproducibility_context(
+    with git_state_context(
         log_path=log_file,
         snapshot_timing=snapshot_timing,
         repo_dir=repo_dir,
