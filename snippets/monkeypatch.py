@@ -11,10 +11,10 @@ def gatekeeper(module_version: str, rules: list[dict]):
     Use with a list of dict like
 
     [{  "version":      "2.3",
-        "comperator":   operator.lt,
+        "comparator":   operator.lt,
         "action":       "skip"},
      {  "version":      "3",
-        "comperator":   operator.ge,
+        "comparator":   operator.ge,
         "action":       "warn" }]
 
     Args:
@@ -26,19 +26,22 @@ def gatekeeper(module_version: str, rules: list[dict]):
         str: rules["action"] if condition is met, else None
     """
     for rule in rules:
-        if rule["comperator"](Version(module_version), Version(rule["version"])):
+        comparator = rule.get("comparator", rule.get("comperator"))
+        if comparator is None:
+            raise KeyError("Missing rule key 'comparator'.")
+        if comparator(Version(module_version), Version(rule["version"])):
             return rule["action"]
 
 
 @contextmanager
 def monkeypatch(dictlist: list[dict]):
-    """contructs a patched context
+    """Constructs a patched context
 
-    Patching the backend of foreign funktions quickly leads to
-    inconsitencies. Using the patch only within a chosen context limits
+    Patching the backend of foreign functions quickly leads to
+    inconsistencies. Using the patch only within a chosen context limits
     side effects.
 
-    Optionally, have :func:`patch_gatekeeper` manage for which version
+    Optionally, have :func:`gatekeeper` manage for which version
     to apply the patch, to warn about compatibility issues, or to raise
     an error.
 
