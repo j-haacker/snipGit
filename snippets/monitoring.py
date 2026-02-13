@@ -233,6 +233,46 @@ def _render_or_empty(text: str) -> str:
     return f"{text}\n"
 
 
+def _append_reflog_activity_warning(
+    log_path: Path | str,
+    *,
+    run_start: datetime,
+    repo_dir: Path | str | None,
+    anchor_paths: Sequence[Path | str] | None,
+    max_parent_levels: int,
+    encoding: str,
+) -> None:
+    """Append a warning if reflog shows HEAD activity since `run_start`."""
+    repo_root, _, _ = _discover_repo_root(
+        repo_dir=repo_dir,
+        anchor_paths=anchor_paths,
+        max_parent_levels=max_parent_levels,
+    )
+    if repo_root is None:
+        return
+
+    run_start_str = run_start.isoformat(timespec="seconds")
+    reflog_ok, reflog_output, _ = _run_git(
+        ["reflog", "--since", run_start_str, "--date=iso-strict"],
+        cwd=repo_root,
+    )
+    if not reflog_ok:
+        return
+
+    reflog_lines = [line for line in reflog_output.splitlines() if line.strip() != ""]
+    if len(reflog_lines) == 0:
+        return
+
+    log_file = Path(log_path).expanduser()
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    with log_file.open("a", encoding=encoding) as handle:
+        handle.write(
+            "WARNING: Git reflog recorded "
+            f"{len(reflog_lines)} action(s) since run start {run_start_str}. "
+            "Repository state may have changed during execution.\n\n"
+        )
+
+
 def append_git_state_snapshot(
     log_path: Path | str,
     *,
@@ -391,6 +431,8 @@ def git_state_context(
             f"{snapshot_timing!r}."
         )
 
+    run_start = datetime.now(timezone.utc)
+
     if snapshot_timing in {"start", "both"}:
         append_git_state_snapshot(
             log_path=log_path,
@@ -406,6 +448,14 @@ def git_state_context(
         yield
     finally:
         if snapshot_timing in {"end", "both"}:
+            _append_reflog_activity_warning(
+                log_path=log_path,
+                run_start=run_start,
+                repo_dir=repo_dir,
+                anchor_paths=anchor_paths,
+                max_parent_levels=max_parent_levels,
+                encoding=encoding,
+            )
             append_git_state_snapshot(
                 log_path=log_path,
                 section="END",
