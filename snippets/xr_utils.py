@@ -7,6 +7,7 @@ __all__ = [
 
 from collections.abc import Iterable
 import numpy as np
+from typing import Any, Hashable
 import xarray as xr
 
 
@@ -18,22 +19,27 @@ def build_enc_dict__cmpr_f4(ds: xr.Dataset) -> dict:
     }
 
 
-def get_chunk_number(ds, dim, coords):
+def get_chunk_number(da: xr.DataArray, dim: Hashable, coords: Any) -> list[Any]:
     def _inner(coord):
-        if coord < ds[dim][0] or coord > ds[dim][-1]:
+        if coord < da[dim][0] or coord > da[dim][-1]:
             return None
-        return (ds[dim].isel({dim: np.cumsum(ds.chunks[ds.dims.index(dim)]) - 1}) <= coord).argmin().item(0)
+        return (
+            (da[dim].isel({dim: np.cumsum(da.chunks[da.dims.index(dim)]) - 1}) <= coord)
+            .argmin()
+            .item(0)
+        )
+
     if isinstance(coords, Iterable):
         return [_inner(coord) for coord in coords]
-    return _inner(coords)
+    return [_inner(coords)]
 
 
-def sel_chunks_by_number_range(ds, dim, start, stop):
-    chunk_borders = np.cumsum([0] + list(ds.chunks[ds.dims.index(dim)]))
-    return ds.isel({dim: slice(*chunk_borders[[start, stop + 1]])})
+def sel_chunks_by_number_range(da: xr.DataArray, dim: Hashable, start: int, stop: int):
+    chunk_borders = np.cumsum([0] + list(da.chunks[da.dims.index(dim)]))
+    return da.isel({dim: slice(*chunk_borders[[start, stop + 1]])})
 
 
-def sel_chunks_by_coord_range(ds, **dim_intervals):
+def sel_chunks_by_coord_range(da: xr.DataArray, **dim_intervals) -> xr.DataArray:
     for dim, interval in dim_intervals.items():
-        ds = sel_chunks_by_number_range(ds, dim, *get_chunk_number(ds, dim, interval))
-    return ds
+        da = sel_chunks_by_number_range(da, dim, *get_chunk_number(da, dim, interval))
+    return da
