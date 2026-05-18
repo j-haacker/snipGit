@@ -18,6 +18,11 @@ import sys
 import traceback
 from typing import Literal
 
+try:
+    from snippets.provenance import run_git as _shared_run_git
+except Exception:
+    _shared_run_git = None
+
 
 def mail_traceback_wrapper(
     to_address: str, subject_tag: str = None, from_address: str = None
@@ -59,6 +64,8 @@ def pipe_output_to_logfile(path: Path | str, mode: Literal["a", "w"]):
 
 
 def _run_git(args: Sequence[str], cwd: Path) -> tuple[bool, str, str]:
+    if _shared_run_git is not None:
+        return _shared_run_git(args, cwd)
     try:
         proc = subprocess.run(
             ["git", *args],

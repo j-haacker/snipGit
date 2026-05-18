@@ -12,6 +12,7 @@ __all__ = [
     "unsupervised",
     "parallel",
     "xr_utils",
+    "provenance",
 ]
 
 from contextlib import contextmanager
