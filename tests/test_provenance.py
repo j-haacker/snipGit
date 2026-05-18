@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import subprocess
+from datetime import datetime, timezone
 
 import pytest
 
 from snippets.provenance import (
     append_cf_history,
     append_xarray_history,
+    build_cf_history_entry,
+    canonicalize_remote_url,
     enforce_clean_repos,
     get_git_state,
     get_input_path_state,
+    public_git_state,
 )
 
 
@@ -35,11 +39,13 @@ def test_get_git_state_clean_and_dirty(tmp_path):
     clean = get_git_state(repo)
     assert clean.commit
     assert not clean.dirty
+    assert clean.diff_hash is None
 
     (repo / "data.txt").write_text("dirty\n", encoding="utf-8")
     dirty = get_git_state(repo)
     assert dirty.dirty
     assert dirty.dirty_marker == "+dirty"
+    assert dirty.diff_hash
     assert "data.txt" in dirty.status_short
 
 
@@ -65,6 +71,36 @@ def test_enforce_clean_repos_requires_allow_dirty(tmp_path):
 
 def test_history_append_prepends_new_entry():
     assert append_cf_history("old", "new") == "new\nold"
+
+
+def test_canonical_remote_and_public_git_state_omit_local_root(tmp_path):
+    repo = _repo(tmp_path)
+    _run(["git", "remote", "add", "origin", "github:j-haacker/snipGit"], repo)
+
+    state = public_git_state(get_git_state(repo))
+
+    assert state["remote_url"] == "https://github.com/j-haacker/snipGit"
+    assert canonicalize_remote_url("ssh://github/j-haacker/snipGit.git") == "https://github.com/j-haacker/snipGit"
+    assert state["name"] == "snipGit"
+    assert "repo_root" not in state
+    assert "diff_hash" not in state
+
+
+def test_history_entry_normalizes_module_command_and_omits_inputs_by_default():
+    entry = build_cf_history_entry(
+        [
+            "/home/user/c4v-utils/src/c4v_utils/downscaling.py",
+            "apply",
+            "--provenance-json",
+            "run.provenance.json",
+        ],
+        input_states=[{"path": "/tmp/input.zarr", "backend": "filesystem"}],
+        timestamp=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+
+    assert "python -m c4v_utils.downscaling apply" in entry
+    assert "--provenance-json" not in entry
+    assert "inputs=" not in entry
 
 
 def test_xarray_history_attr_roundtrip():

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shlex
 import subprocess
 from collections.abc import Iterable, Mapping, Sequence
@@ -38,6 +39,43 @@ class InputPathState:
     git_path: str | None = None
     git_status: str = ""
     error: str | None = None
+
+
+def canonicalize_remote_url(remote_url: str | None) -> str | None:
+    """Return a portable, reader-friendly form of a Git remote URL."""
+
+    if not remote_url:
+        return None
+    remote_url = remote_url.strip()
+    if not remote_url:
+        return None
+
+    def clean_path(path: str) -> str:
+        path = path.strip("/")
+        if path.endswith(".git"):
+            path = path[:-4]
+        return path
+
+    if remote_url.startswith(("http://", "https://")):
+        scheme, rest = remote_url.split("://", 1)
+        return f"{scheme}://{clean_path(rest)}"
+
+    match = re.match(r"git@([^:]+):(.+)", remote_url)
+    if match:
+        host, path = match.groups()
+        return f"https://{host}/{clean_path(path)}"
+
+    match = re.match(r"ssh://(?:[^@/]+@)?([^/]+)/(.+)", remote_url)
+    if match:
+        host, path = match.groups()
+        if host == "github":
+            host = "github.com"
+        return f"https://{host}/{clean_path(path)}"
+
+    if remote_url.startswith("github:"):
+        return f"https://github.com/{clean_path(remote_url.removeprefix('github:'))}"
+
+    return remote_url
 
 
 def run_git(args: Sequence[str], cwd: Path | str) -> tuple[bool, str, str]:
@@ -97,20 +135,22 @@ def get_git_state(
     remote_ok, remote_output, _ = run_git(["remote", "get-url", remote], cwd=repo_root)
     _, status_output, _ = run_git(["status", "--porcelain"], cwd=repo_root)
 
+    branch = branch_output.strip() or None
+    dirty = bool(status_output.strip())
     diff_hash = None
-    if include_diff_hash:
+    if include_diff_hash and dirty:
         _, staged, _ = run_git(["diff", "--cached", "--no-ext-diff", "--"], cwd=repo_root)
         _, unstaged, _ = run_git(["diff", "--no-ext-diff", "--"], cwd=repo_root)
         diff_payload = f"{status_output}\n{staged}\n{unstaged}"
         diff_hash = hashlib.sha256(diff_payload.encode("utf-8", errors="replace")).hexdigest()
 
-    branch = branch_output.strip() or None
-    dirty = bool(status_output.strip())
     return GitState(
         repo_root=repo_root,
         commit=commit_output.strip() or None,
         branch=branch,
-        remote_url=remote_output.strip() if remote_ok and remote_output.strip() else None,
+        remote_url=canonicalize_remote_url(
+            remote_output.strip() if remote_ok and remote_output.strip() else None
+        ),
         dirty=dirty,
         dirty_marker="+dirty" if dirty else "",
         status_short=status_output.rstrip("\n"),
@@ -118,15 +158,98 @@ def get_git_state(
     )
 
 
-def format_git_state(state: GitState | Mapping[str, Any]) -> str:
+def _repo_name_from_remote(remote_url: str | None) -> str | None:
+    if not remote_url:
+        return None
+    remote_url = canonicalize_remote_url(remote_url) or remote_url
+    path = remote_url.rstrip("/").removesuffix(".git").split("/")[-1]
+    return path or None
+
+
+def _repo_name_from_path(path: str | None) -> str | None:
+    if not path:
+        return None
+    try:
+        return Path(path).name or None
+    except TypeError:
+        return None
+
+
+def public_git_state(state: GitState | Mapping[str, Any]) -> dict[str, Any]:
+    """Return a portable Git state record suitable for file metadata."""
+
     data = to_jsonable(state)
-    commit = data.get("commit") or data.get("git_head") or "unknown"
-    short = str(commit)[:12]
+    remote_url = canonicalize_remote_url(data.get("remote_url") or data.get("remote"))
     dirty = bool(data.get("dirty") or data.get("git_dirty"))
+    name = (
+        data.get("name")
+        or data.get("package")
+        or _repo_name_from_remote(remote_url)
+        or _repo_name_from_path(data.get("repo_root"))
+        or _repo_name_from_path(data.get("label"))
+    )
+    result: dict[str, Any] = {
+        "name": name,
+        "commit": data.get("commit") or data.get("git_head"),
+        "branch": data.get("branch") or data.get("git_branch"),
+        "remote_url": remote_url,
+        "dirty": dirty,
+    }
+    if dirty:
+        result["dirty_marker"] = data.get("dirty_marker") or "+dirty"
+        if data.get("diff_hash") or data.get("git_diff_hash"):
+            result["diff_hash"] = data.get("diff_hash") or data.get("git_diff_hash")
+        if data.get("status_short"):
+            result["status_short"] = data.get("status_short")
+    return {key: value for key, value in result.items() if value not in (None, "")}
+
+
+def format_git_state(state: GitState | Mapping[str, Any]) -> str:
+    data = public_git_state(state)
+    commit = data.get("commit") or "unknown"
+    short = str(commit)[:12]
+    dirty = bool(data.get("dirty"))
     marker = "+dirty" if dirty else ""
-    branch = data.get("branch") or data.get("git_branch") or "detached"
-    remote = data.get("remote_url") or data.get("remote") or "no-remote"
-    return f"{short}{marker} ({branch}; {remote})"
+    branch = data.get("branch") or "detached"
+    name = data.get("name")
+    prefix = f"{name}@" if name else ""
+    return f"{prefix}{short}{marker} ({branch})"
+
+
+def public_input_path_state(state: InputPathState | Mapping[str, Any]) -> dict[str, Any]:
+    """Return a compact input path record without local-only repository roots."""
+
+    data = to_jsonable(state)
+    metadata = data.get("metadata", {})
+    public_metadata: dict[str, Any] = {}
+    if metadata.get("directory"):
+        public_metadata["directory"] = metadata["directory"]
+    lfs = metadata.get("lfs") or {}
+    if lfs.get("tracked_by_lfs") or lfs.get("is_pointer_file"):
+        public_metadata["lfs"] = {
+            key: value
+            for key, value in lfs.items()
+            if key in {"tracked_by_lfs", "is_pointer_file", "oid", "size"}
+        }
+    dvc = metadata.get("dvc") or {}
+    if dvc.get("dvc_files") or dvc.get("outputs"):
+        public_metadata["dvc"] = dvc
+
+    result: dict[str, Any] = {
+        "path": data.get("git_path") or data.get("path"),
+        "exists": data.get("exists"),
+        "kind": data.get("kind"),
+        "backend": data.get("backend"),
+    }
+    if public_metadata:
+        result["metadata"] = public_metadata
+    if data.get("git_state"):
+        result["git"] = public_git_state(data["git_state"])
+    if data.get("git_status"):
+        result["git_status"] = data["git_status"]
+    if data.get("error"):
+        result["error"] = data["error"]
+    return {key: value for key, value in result.items() if value not in (None, "")}
 
 
 def _path_kind(path: Path) -> str:
@@ -354,12 +477,70 @@ def to_jsonable(value: Any) -> Any:
     return str(value)
 
 
+def public_provenance(value: Any) -> Any:
+    """Return provenance metadata intended to be burned into public outputs."""
+
+    if isinstance(value, InputPathState):
+        return public_input_path_state(value)
+    if isinstance(value, GitState):
+        return public_git_state(value)
+    data = to_jsonable(value)
+    if isinstance(data, Mapping):
+        result: dict[str, Any] = {}
+        for key, item in data.items():
+            if key in {"history_entry", "repo_root", "source_path"}:
+                continue
+            if key in {"git_head", "git_branch", "git_dirty", "git_diff_hash"}:
+                continue
+            if key == "software_repos" and isinstance(item, Iterable):
+                result[key] = [public_git_state(state) for state in item]
+                continue
+            if key == "input_paths" and isinstance(item, Iterable):
+                result[key] = [public_input_path_state(state) for state in item]
+                continue
+            if key == "remote_url":
+                result[key] = canonicalize_remote_url(str(item)) if item else None
+                continue
+            if key == "diff_hash" and not data.get("dirty"):
+                continue
+            if key == "status_short" and not item:
+                continue
+            result[str(key)] = public_provenance(item)
+        return {key: item for key, item in result.items() if item not in (None, "")}
+    if isinstance(data, list):
+        return [public_provenance(item) for item in data]
+    return data
+
+
+def _clean_command_parts(parts: Sequence[str]) -> list[str]:
+    cleaned = []
+    skip_next = False
+    for part in [str(item) for item in parts]:
+        if skip_next:
+            skip_next = False
+            continue
+        if part == "--provenance-json":
+            skip_next = True
+            continue
+        if part.startswith("--provenance-json="):
+            continue
+        cleaned.append(part)
+
+    if not cleaned:
+        return cleaned
+
+    first = Path(cleaned[0])
+    if first.name == "downscaling.py" and "c4v_utils" in first.parts:
+        return ["python", "-m", "c4v_utils.downscaling", *cleaned[1:]]
+    return cleaned
+
+
 def _command_text(command: str | Sequence[str] | None) -> str:
     if command is None:
         return "unknown command"
     if isinstance(command, str):
         return command
-    return shlex.join([str(part) for part in command])
+    return shlex.join(_clean_command_parts(command))
 
 
 def build_cf_history_entry(
@@ -369,6 +550,7 @@ def build_cf_history_entry(
     git_states: Sequence[GitState | Mapping[str, Any]] = (),
     input_states: Sequence[InputPathState | Mapping[str, Any]] = (),
     timestamp: datetime | None = None,
+    include_inputs: bool = False,
 ) -> str:
     when = timestamp or datetime.now(timezone.utc)
     if when.tzinfo is None:
@@ -380,7 +562,7 @@ def build_cf_history_entry(
         states.insert(0, git_state)
     if states:
         parts.append("software=" + ", ".join(format_git_state(state) for state in states))
-    if input_states:
+    if include_inputs and input_states:
         compact = []
         for state in input_states:
             data = to_jsonable(state)
