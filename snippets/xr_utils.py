@@ -1,14 +1,89 @@
 __all__ = [
     "build_enc_dict__cmpr_f4",
     "get_chunk_number",
+    "print_xarray_dataset_summary",
     "sel_chunks_by_coord_range",
     "sel_chunks_by_number_range",
+    "xarray_dataset_summary",
 ]
 
 from collections.abc import Iterable
 import numpy as np
-from typing import Any, Hashable
+import sys
+from typing import Any, Hashable, TextIO
 import xarray as xr
+
+
+def _as_dataset(obj: xr.Dataset | xr.DataArray) -> xr.Dataset:
+    if isinstance(obj, xr.Dataset):
+        return obj
+    if isinstance(obj, xr.DataArray):
+        name = obj.name if obj.name is not None else "data"
+        return obj.to_dataset(name=name)
+    raise TypeError("obj must be an xarray Dataset or DataArray.")
+
+
+def _xarray_variable_summary(
+    name: str,
+    variable: xr.Variable,
+    *,
+    prefix: str,
+) -> tuple[str, str]:
+    data = variable.data
+    backend = type(data).__name__
+    chunks = getattr(variable, "chunks", None) or getattr(data, "chunks", None)
+    is_lazy = callable(getattr(data, "__dask_graph__", None)) or chunks is not None
+    if is_lazy:
+        status = "lazy"
+    elif isinstance(data, np.ndarray):
+        status = "loaded"
+    else:
+        status = "other"
+    chunk_text = f", chunks={chunks!r}" if chunks is not None else ""
+    line = (
+        f"{prefix} variable {name!r}: status={status}, dims={variable.dims!r}, "
+        f"shape={variable.shape!r}, dtype={variable.dtype}, backend={backend}"
+        f"{chunk_text}, nbytes={variable.nbytes}"
+    )
+    return status, line
+
+
+def xarray_dataset_summary(
+    obj: xr.Dataset | xr.DataArray,
+    *,
+    label: str | None = None,
+    prefix: str = "[xarray-debug]",
+) -> str:
+    """Summarize xarray structure and lazy/eager state without computing data."""
+
+    ds = _as_dataset(obj)
+    lines = [f"{prefix} {label}" if label is not None else prefix, str(ds)]
+    summaries = [
+        _xarray_variable_summary(name, variable, prefix=prefix)
+        for name, variable in ds.variables.items()
+    ]
+    lazy = sum(status == "lazy" for status, _ in summaries)
+    loaded = sum(status == "loaded" for status, _ in summaries)
+    other = len(summaries) - lazy - loaded
+    lines.append(
+        f"{prefix} variables: total={len(summaries)}, "
+        f"lazy={lazy}, loaded={loaded}, other={other}"
+    )
+    lines.extend(line for _, line in summaries)
+    return "\n".join(lines)
+
+
+def print_xarray_dataset_summary(
+    obj: xr.Dataset | xr.DataArray,
+    *,
+    label: str | None = None,
+    prefix: str = "[xarray-debug]",
+    file: TextIO | None = None,
+) -> None:
+    """Print :func:`xarray_dataset_summary` to a file-like object."""
+
+    target = sys.stdout if file is None else file
+    print(xarray_dataset_summary(obj, label=label, prefix=prefix), file=target)
 
 
 def build_enc_dict__cmpr_f4(ds: xr.Dataset) -> dict:

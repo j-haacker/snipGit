@@ -21,6 +21,7 @@ full = [
     "xarray",
 ]
 dev = [
+    "dask[array]",
     "pytest",
     "ruff",
     "uv",
