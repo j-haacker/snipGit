@@ -11,6 +11,9 @@ license-files = ["LICENSE"]
 dynamic = ["version", "description"]
 classifiers = ["Private :: Do Not Upload"]
 requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+]
 
 [project.urls]
 Home = "https://github.com/j-haacker/snipGit"
@@ -26,7 +29,13 @@ dev = [
     "ruff",
     "uv",
 ]
-all = ["snippets[full,dev]"]
+docs = [
+    "furo",
+    "myst-parser",
+    "sphinx",
+    "xarray",
+]
+all = ["snippets[full,dev,docs]"]
 
 [tool.ruff.lint]
 select = ["E", "F"]
