@@ -10,14 +10,14 @@ import warnings
 def gatekeeper(module_version: str, rules: list[dict]):
     """Checks whether a patch should be applied
 
-    Use with a list of dict like
+    Use with a list of dict like::
 
-    [{  "version":      "2.3",
-        "comparator":   operator.lt,
-        "action":       "skip"},
-     {  "version":      "3",
-        "comparator":   operator.ge,
-        "action":       "warn" }]
+        [{  "version":      "2.3",
+            "comparator":   operator.lt,
+            "action":       "skip"},
+         {  "version":      "3",
+            "comparator":   operator.ge,
+            "action":       "warn" }]
 
     Args:
         module_version (str): current version of the patched module
@@ -47,18 +47,18 @@ def monkeypatch(dictlist: list[dict]):
     to apply the patch, to warn about compatibility issues, or to raise
     an error.
 
-    Use like:
+    Use like::
 
-    patchdicts = [{ "module":       mod1,
-                    "target":       "obj1",
-                    "replacement":  patch1,
-                    "version":      base_mod1.__version__,  # optional
-                    "rules":        rules1},  # optional
-                  { "module":       mod2,
-                    "target":       "obj2",
-                    "replacement":  patch2 }]
-    with monkeypatch(patchdicts):
-        <your code>
+        patchdicts = [{ "module":       mod1,
+                        "target":       "obj1",
+                        "replacement":  patch1,
+                        "version":      base_mod1.__version__,  # optional
+                        "rules":        rules1},  # optional
+                      { "module":       mod2,
+                        "target":       "obj2",
+                        "replacement":  patch2 }]
+        with monkeypatch(patchdicts):
+            <your code>
 
     Args:
         dictlist (list[dict]): Requires keys "module", "target", and
