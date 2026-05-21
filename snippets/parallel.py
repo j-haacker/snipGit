@@ -1,3 +1,5 @@
+"""Small threading helpers."""
+
 __all__ = [
     "same_task_threads",
 ]
@@ -9,16 +11,17 @@ import threading
 def same_task_threads(
     task_func: callable, n_workers: int, result_queue: queue.Queue = None
 ) -> queue.Queue:
-    """Creates workers and provides queue to assign work
+    """Create workers and return the queue used to assign tasks.
 
     Args:
-        task_func (callable): Task.
+        task_func (callable): Function called for each queued task tuple.
         n_workers (int): Number of requested workers.
         result_queue (queue.Queue, optional): Queue in which to drop
             results. Defaults to None.
 
     Returns:
-        queue.Queue: Task queue.
+        queue.Queue: Task queue. Put ``None`` in the queue to skip work; task
+        tuples are expanded as ``task_func(*next_task)``.
     """
     task_queue = queue.Queue()
 

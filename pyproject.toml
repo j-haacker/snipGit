@@ -32,6 +32,7 @@ dev = [
 docs = [
     "furo",
     "myst-parser",
+    "packaging",
     "sphinx",
     "xarray",
 ]

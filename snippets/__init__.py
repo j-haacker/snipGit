@@ -1,4 +1,4 @@
-"""Python snippets"""
+"""Small Python helpers for interactive analysis and workflow scripts."""
 
 __version__ = "0.1.0"
 
@@ -21,6 +21,8 @@ from sys import exit
 
 
 def is_notebook() -> bool:
+    """Return whether the current interpreter appears to be a notebook shell."""
+
     # CREDIT Gustavo Bezerra https://stackoverflow.com/a/39662359
     try:
         shell = get_ipython().__class__.__name__  # type: ignore
@@ -56,7 +58,16 @@ def precision(uncertainty: float) -> int:
 
 
 @contextmanager
-def wrap_sys_exit(code_dict: set[tuple[Exception,int]] | None = None):
+def wrap_sys_exit(code_dict: set[tuple[Exception, int]] | None = None):
+    """Convert exceptions raised in a context into process exit codes.
+
+    Args:
+        code_dict: Optional set of ``(exception_type, exit_code)`` pairs.
+
+    Yields:
+        Control to the wrapped block, then exits with ``0`` on success.
+    """
+
     try:
         yield
     except Exception as err:

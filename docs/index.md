@@ -18,7 +18,7 @@ Install the package with the documentation dependencies when working on this
 site:
 
 ```bash
-python -m pip install -e ".[docs,full]"
+python -m pip install -e ".[docs]"
 ```
 
 Build the HTML documentation locally with warnings treated as errors:

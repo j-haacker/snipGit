@@ -35,3 +35,11 @@
 :members:
 :show-inheritance:
 ```
+
+## Package helpers
+
+```{automodule} snippets
+:members:
+:exclude-members: debugging, monkeypatch, monitoring, parallel, provenance, xr_utils
+:show-inheritance:
+```

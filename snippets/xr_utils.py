@@ -1,3 +1,5 @@
+"""Utilities for inspecting and slicing xarray objects."""
+
 __all__ = [
     "build_enc_dict__cmpr_f4",
     "get_chunk_number",
@@ -87,6 +89,8 @@ def print_xarray_dataset_summary(
 
 
 def build_enc_dict__cmpr_f4(ds: xr.Dataset) -> dict:
+    """Build NetCDF compression encoding for multi-dimensional data variables."""
+
     return {
         _var: {"zlib": True, "complevel": 3, "dtype": "float32"}
         for _var in ds.data_vars
@@ -95,6 +99,8 @@ def build_enc_dict__cmpr_f4(ds: xr.Dataset) -> dict:
 
 
 def get_chunk_number(da: xr.DataArray, dim: Hashable, coords: Any) -> list[Any]:
+    """Return chunk indices containing one or more coordinates along a dimension."""
+
     def _inner(coord):
         if coord < da[dim][0] or coord > da[dim][-1]:
             return None
@@ -110,11 +116,15 @@ def get_chunk_number(da: xr.DataArray, dim: Hashable, coords: Any) -> list[Any]:
 
 
 def sel_chunks_by_number_range(da: xr.DataArray, dim: Hashable, start: int, stop: int):
+    """Select a contiguous inclusive range of chunk numbers along a dimension."""
+
     chunk_borders = np.cumsum([0] + list(da.chunks[da.dims.index(dim)]))
     return da.isel({dim: slice(*chunk_borders[[start, stop + 1]])})
 
 
 def sel_chunks_by_coord_range(da: xr.DataArray, **dim_intervals) -> xr.DataArray:
+    """Select chunk ranges that contain coordinate intervals for each dimension."""
+
     for dim, interval in dim_intervals.items():
         da = sel_chunks_by_number_range(da, dim, *get_chunk_number(da, dim, interval))
     return da

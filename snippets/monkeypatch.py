@@ -1,3 +1,5 @@
+"""Context helpers for applying temporary monkeypatches."""
+
 __all__ = ["gatekeeper", "monkeypatch"]
 
 from contextlib import contextmanager

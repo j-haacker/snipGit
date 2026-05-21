@@ -1,3 +1,5 @@
+"""Monitoring helpers for logging failures, output streams, and Git state."""
+
 __all__ = [
     "append_git_state_snapshot",
     "git_state_context",
@@ -27,6 +29,14 @@ except Exception:
 def mail_traceback_wrapper(
     to_address: str, subject_tag: str = None, from_address: str = None
 ):
+    """Return a decorator that emails tracebacks through localhost SMTP.
+
+    Args:
+        to_address: Recipient email address.
+        subject_tag: Optional prefix added to the error subject.
+        from_address: Optional sender address.
+    """
+
     # CREDIT: FBruzzesi, Nathan Davis https://stackoverflow.com/a/27500036
     def decorate(f):
         def applicator(*args, **kwargs):
@@ -54,6 +64,8 @@ def mail_traceback_wrapper(
 
 @contextmanager
 def pipe_output_to_logfile(path: Path | str, mode: Literal["a", "w"]):
+    """Redirect stdout and stderr to a logfile inside the context."""
+
     with open(path, mode) as lf:
         orig_pipes = sys.stderr, sys.stdout
         sys.stderr = sys.stdout = lf
