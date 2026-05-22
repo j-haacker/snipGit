@@ -8,6 +8,7 @@ recording software state, input state, and CF/xarray history metadata.
 :maxdepth: 2
 
 provenance
+debugging
 glossary
 api
 ```

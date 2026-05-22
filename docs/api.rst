@@ -15,6 +15,13 @@ Monitoring
    :members:
    :show-inheritance:
 
+Debugging
+---------
+
+.. automodule:: snippets.debugging
+   :members:
+   :show-inheritance:
+
 Monkeypatch
 -----------
 
