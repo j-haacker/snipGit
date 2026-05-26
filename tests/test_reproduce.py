@@ -177,6 +177,33 @@ def test_reproduce_sets_up_production_workspace_without_editable_deps(tmp_path):
     assert not any(item["step"] == "fetch main branch" for item in report["commands"])
 
 
+def test_reproduce_prefers_matching_local_checkout(tmp_path, monkeypatch):
+    main_repo = _git_repo(
+        tmp_path,
+        "main",
+        files={"pyproject.toml": "[tool.pixi.workspace]\n"},
+    )
+    provenance = _write_provenance(
+        tmp_path / "run",
+        main_repo=main_repo,
+        env_name="downscale",
+        lock_text="version: 6\nenvironments:\n  downscale:\n    packages: {}\n",
+    )
+    payload = json.loads(provenance.read_text(encoding="utf-8"))
+    payload["software_repos"][0]["remote_url"] = "https://example.invalid/main"
+    provenance.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    monkeypatch.chdir(main_repo)
+
+    report = reproduce_from_provenance(
+        provenance=provenance,
+        workspace=tmp_path / "workspace",
+        install=False,
+    )
+
+    assert report["status"] == "completed"
+    assert report["repos"][0]["source"] == str(main_repo)
+
+
 def test_reproduce_rebases_editable_dependency_paths(tmp_path):
     main_repo = _git_repo(
         tmp_path,

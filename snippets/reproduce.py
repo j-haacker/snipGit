@@ -185,7 +185,48 @@ def _select_project_repo(
 
 def _repo_source(state: dict[str, Any], sources: dict[str, str]) -> str | None:
     name = _repo_name(state)
-    return sources.get(name) or state.get("remote_url")
+    return (
+        sources.get(name)
+        or _matching_local_repo_source(state)
+        or state.get("remote_url")
+    )
+
+
+def _git_value(repo: Path, args: list[str]) -> str:
+    proc = subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    return proc.stdout.strip() if proc.returncode == 0 else ""
+
+
+def _repo_contains_commit(repo: Path, commit: str | None) -> bool:
+    if not commit:
+        return False
+    return _git_value(repo, ["cat-file", "-t", commit]) == "commit"
+
+
+def _candidate_local_repos(name: str) -> list[Path]:
+    cwd = Path.cwd().resolve()
+    candidates = [cwd, cwd.parent / name]
+    return list(dict.fromkeys(candidates))
+
+
+def _matching_local_repo_source(state: dict[str, Any]) -> str | None:
+    name = _repo_name(state)
+    commit = state.get("commit")
+    for candidate in _candidate_local_repos(name):
+        if not (candidate / ".git").exists():
+            continue
+        if not _repo_contains_commit(candidate, commit):
+            continue
+        return str(candidate)
+    return None
 
 
 def _branch_name(state: dict[str, Any]) -> str | None:
