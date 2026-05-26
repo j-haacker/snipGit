@@ -170,10 +170,11 @@ def test_reproduce_sets_up_production_workspace_without_editable_deps(tmp_path):
     assert (tmp_path / "workspace" / "reproduction.json").exists()
     assert (tmp_path / "workspace" / "REPRODUCTION.md").exists()
     assert any(
-        item["step"] == "fetch main branch"
-        and item["command"] == ["git", "fetch", "origin", "dev"]
+        item["step"] == "clone main"
+        and item["command"][:4] == ["git", "clone", "--branch", "dev"]
         for item in report["commands"]
     )
+    assert not any(item["step"] == "fetch main branch" for item in report["commands"])
 
 
 def test_reproduce_rebases_editable_dependency_paths(tmp_path):

@@ -247,20 +247,18 @@ def _clone_or_resume_repo(
             )
     else:
         destination.parent.mkdir(parents=True, exist_ok=True)
+        branch = _branch_name(state)
+        clone_command = ["git", "clone"]
+        if branch:
+            clone_command.extend(["--branch", branch, "--single-branch"])
+        clone_command.extend([source, str(destination)])
         _run(
-            ["git", "clone", source, str(destination)],
+            clone_command,
             report=report,
             step=f"clone {name}",
         )
     branch = _branch_name(state)
-    if branch:
-        _run(
-            ["git", "fetch", "origin", branch],
-            cwd=destination,
-            report=report,
-            step=f"fetch {name} branch",
-        )
-    else:
+    if not branch:
         _run(
             ["git", "fetch", "--all", "--tags", "--prune"],
             cwd=destination,
