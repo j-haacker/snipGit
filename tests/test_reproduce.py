@@ -172,8 +172,8 @@ def test_reproduce_sets_up_production_workspace_without_editable_deps(tmp_path):
 
     assert report["status"] == "completed"
     assert report["environment"]["mode"] == "production"
-    assert not (tmp_path / "workspace" / "repos").exists()
-    assert (tmp_path / "workspace" / "pixi.lock").read_text() == (
+    assert (tmp_path / "workspace" / "repos" / "main" / ".git").exists()
+    assert (tmp_path / "workspace" / "repos" / "main" / "pixi.lock").read_text() == (
         tmp_path / "run" / "provenance" / "environment" / "pixi.lock"
     ).read_text()
     assert "--provenance-json" not in report["command"]["effective"]
@@ -214,6 +214,50 @@ def test_reproduce_prefers_matching_local_checkout(tmp_path, monkeypatch):
     assert report["repos"][0]["source"] == str(main_repo)
 
 
+def test_reproduce_resolves_recorded_input_paths(tmp_path, monkeypatch):
+    main_repo = _git_repo(
+        tmp_path,
+        "main",
+        files={"pyproject.toml": "[tool.pixi.workspace]\n"},
+    )
+    input_path = tmp_path / "source-data" / "old-input.zarr"
+    input_path.parent.mkdir()
+    input_path.write_text("data\n", encoding="utf-8")
+    provenance = _write_provenance(
+        tmp_path / "run",
+        main_repo=main_repo,
+        env_name="downscale",
+        lock_text="version: 6\nenvironments:\n  downscale:\n    packages: {}\n",
+    )
+    payload = json.loads(provenance.read_text(encoding="utf-8"))
+    payload["command"] = [
+        "python",
+        "-m",
+        "example",
+        "--input",
+        "source-data/old-input.zarr",
+    ]
+    payload["input_paths"] = [{"path": "source-data/old-input.zarr"}]
+    provenance.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    monkeypatch.chdir(tmp_path)
+
+    report = reproduce_from_provenance(
+        provenance=provenance,
+        workspace=tmp_path / "workspace",
+        install=False,
+    )
+
+    assert report["status"] == "completed"
+    assert report["command"]["effective"][-1] == str(input_path)
+    assert report["resolved_inputs"] == [
+        {
+            "path": "source-data/old-input.zarr",
+            "resolved": str(input_path),
+            "source": "recorded-input-path",
+        }
+    ]
+
+
 def test_reproduce_preserves_editable_dependency_paths(tmp_path):
     main_repo = _git_repo(
         tmp_path,
@@ -251,20 +295,17 @@ def test_reproduce_preserves_editable_dependency_paths(tmp_path):
 
     assert report["status"] == "completed"
     assert report["environment"]["mode"] == "editable-local"
-    assert (tmp_path / "dep" / ".git").exists()
-    pyproject_text = (tmp_path / "workspace" / "pyproject.toml").read_text()
+    assert (tmp_path / "workspace" / "repos" / "dep" / ".git").exists()
+    pyproject_text = (
+        tmp_path / "workspace" / "repos" / "main" / "pyproject.toml"
+    ).read_text()
     assert 'path = "../dep"' in pyproject_text
-    assert "- pypi: ../dep" in (tmp_path / "workspace" / "pixi.lock").read_text()
+    assert "- pypi: ../dep" in (
+        tmp_path / "workspace" / "repos" / "main" / "pixi.lock"
+    ).read_text()
     assert _branch(dep_repo) == "dev"
-    assert not any(item["step"] == "checkout dep" for item in report["commands"])
-    assert report["adaptations"] == [
-        {
-            "kind": "existing-editable-dependency",
-            "repo": "dep",
-            "path": str(tmp_path / "dep"),
-            "commit": _commit(dep_repo),
-        }
-    ]
+    assert not any(item["cwd"] == str(dep_repo) for item in report["commands"])
+    assert not report["adaptations"]
 
 
 def test_reproduce_uses_untracked_local_editable_dependency(tmp_path, monkeypatch):
@@ -302,7 +343,7 @@ def test_reproduce_uses_untracked_local_editable_dependency(tmp_path, monkeypatc
     )
 
     assert report["status"] == "completed"
-    assert (tmp_path / "dep" / ".git").exists()
+    assert (tmp_path / "workspace" / "repos" / "dep" / ".git").exists()
     assert report["repos"][1]["source"] == str(dep_repo)
     assert any("not tracked in software_repos" in item for item in report["warnings"])
 

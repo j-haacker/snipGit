@@ -113,6 +113,48 @@ def apply_input_maps(command: list[str], input_maps: dict[str, str]) -> list[str
     return [input_maps.get(part, part) for part in command]
 
 
+def _resolve_existing_recorded_path(value: str, provenance_path: Path) -> Path | None:
+    path = Path(value).expanduser()
+    if path.is_absolute():
+        return path.resolve() if path.exists() else None
+    bases = [Path.cwd().resolve(), *provenance_path.parents]
+    for base in dict.fromkeys(bases):
+        candidate = base / path
+        if candidate.exists():
+            return candidate.resolve()
+    return None
+
+
+def resolve_input_maps(
+    *,
+    record: dict[str, Any],
+    provenance_path: Path,
+    explicit_maps: dict[str, str],
+    report: dict[str, Any],
+) -> dict[str, str]:
+    resolved_maps = dict(explicit_maps)
+    report["resolved_inputs"] = []
+    for item in record.get("input_paths") or []:
+        original = str(item.get("path") or "")
+        if not original or original in resolved_maps:
+            continue
+        resolved = _resolve_existing_recorded_path(original, provenance_path)
+        if resolved is None:
+            report["warnings"].append(
+                f"Recorded input path could not be resolved: {original}"
+            )
+            continue
+        resolved_maps[original] = str(resolved)
+        report["resolved_inputs"].append(
+            {
+                "path": original,
+                "resolved": str(resolved),
+                "source": "recorded-input-path",
+            }
+        )
+    return resolved_maps
+
+
 def parse_key_value(items: list[str] | None) -> dict[str, str]:
     result = {}
     for item in items or []:
@@ -554,6 +596,13 @@ def reproduce_from_provenance(
 
     record = load_json(provenance_path)
     report["product"] = record.get("product") or {}
+    resolved_input_maps = resolve_input_maps(
+        record=record,
+        provenance_path=provenance_path,
+        explicit_maps=input_maps,
+        report=report,
+    )
+    report["input_maps"] = resolved_input_maps
     recorded_command = (
         record.get("command") or (record.get("process") or {}).get("command") or []
     )
@@ -561,7 +610,7 @@ def reproduce_from_provenance(
     report["command"] = {
         "recorded": recorded_command,
         "cleaned": command,
-        "effective": apply_input_maps(command, input_maps),
+        "effective": apply_input_maps(command, resolved_input_maps),
     }
 
     sidecar = provenance_path.with_suffix(f"{provenance_path.suffix}.sha256")
@@ -625,7 +674,11 @@ def reproduce_from_provenance(
         "local_path_dependencies": local_paths,
     }
 
-    _verify_input_provenance(record=record, input_maps=input_maps, report=report)
+    _verify_input_provenance(
+        record=record,
+        input_maps=resolved_input_maps,
+        report=report,
+    )
 
     if workspace_path.exists():
         if force:
@@ -637,10 +690,13 @@ def reproduce_from_provenance(
 
     repos = record.get("software_repos") or []
     project = _select_project_repo(repos, project_repo)
+    repo_root = workspace_path / "repos"
+    project_path = repo_root / _repo_name(project)
+    report["project_repo_path"] = str(project_path)
     artifact_dir = workspace_path / "provenance-source"
     project_was_restored = _clone_or_resume_repo(
         state=project,
-        destination=workspace_path,
+        destination=project_path,
         sources=repo_sources,
         report=report,
         resume=resume,
@@ -649,7 +705,7 @@ def reproduce_from_provenance(
         _apply_patch_if_present(
             state=project,
             provenance_path=provenance_path,
-            repo_path=workspace_path,
+            repo_path=project_path,
             artifact_dir=artifact_dir,
             report=report,
         )
@@ -673,7 +729,7 @@ def reproduce_from_provenance(
         name="environment summary",
     )
     if copied_lock is not None:
-        shutil.copy2(copied_lock, workspace_path / "pixi.lock")
+        shutil.copy2(copied_lock, project_path / "pixi.lock")
 
     repo_by_name = {_repo_name(state): state for state in repos}
     if editable:
@@ -694,7 +750,7 @@ def reproduce_from_provenance(
                     f"Editable dependency {name!r} was not tracked in "
                     "software_repos; using matching local checkout."
                 )
-            destination = (workspace_path / str(local_path)).resolve()
+            destination = (project_path / str(local_path)).resolve()
             dependency_was_restored = _clone_or_resume_repo(
                 state=state,
                 destination=destination,
@@ -721,7 +777,7 @@ def reproduce_from_provenance(
             if install:
                 _run(
                     ["pixi", "install", "--locked", "-e", str(env_name)],
-                    cwd=workspace_path,
+                    cwd=project_path,
                     report=report,
                     step="pixi install",
                 )
@@ -734,7 +790,7 @@ def reproduce_from_provenance(
                         str(env_name),
                         *report["command"]["effective"],
                     ],
-                    cwd=workspace_path,
+                    cwd=project_path,
                     report=report,
                     step="execute command",
                 )
