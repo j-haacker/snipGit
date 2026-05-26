@@ -188,6 +188,13 @@ def _repo_source(state: dict[str, Any], sources: dict[str, str]) -> str | None:
     return sources.get(name) or state.get("remote_url")
 
 
+def _branch_name(state: dict[str, Any]) -> str | None:
+    branch = state.get("branch")
+    if not branch or branch == "detached":
+        return None
+    return str(branch)
+
+
 def _run(
     command: list[str],
     *,
@@ -245,6 +252,21 @@ def _clone_or_resume_repo(
             report=report,
             step=f"clone {name}",
         )
+    branch = _branch_name(state)
+    if branch:
+        _run(
+            ["git", "fetch", "origin", branch],
+            cwd=destination,
+            report=report,
+            step=f"fetch {name} branch",
+        )
+    else:
+        _run(
+            ["git", "fetch", "--all", "--tags", "--prune"],
+            cwd=destination,
+            report=report,
+            step=f"fetch {name}",
+        )
     commit = state.get("commit")
     if commit:
         _run(
@@ -259,6 +281,7 @@ def _clone_or_resume_repo(
             "source": source,
             "path": str(destination),
             "commit": commit,
+            "branch": branch,
             "dirty": bool(state.get("dirty")),
         }
     )

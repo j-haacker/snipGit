@@ -28,6 +28,10 @@ def _git_repo(
         target.write_text(text, encoding="utf-8")
     _run(["git", "add", "."], repo)
     _run(["git", "commit", "-m", "initial"], repo)
+    _run(["git", "checkout", "-b", "dev"], repo)
+    (repo / ".branch").write_text("dev\n", encoding="utf-8")
+    _run(["git", "add", ".branch"], repo)
+    _run(["git", "commit", "-m", "dev"], repo)
     return repo
 
 
@@ -81,6 +85,7 @@ def _write_provenance(
         {
             "name": "main",
             "commit": _commit(main_repo),
+            "branch": "dev",
             "remote_url": str(main_repo),
             "dirty": False,
         }
@@ -90,6 +95,7 @@ def _write_provenance(
             {
                 "name": "dep",
                 "commit": _commit(dep_repo),
+                "branch": "dev",
                 "remote_url": str(dep_repo),
                 "dirty": False,
             }
@@ -163,6 +169,11 @@ def test_reproduce_sets_up_production_workspace_without_editable_deps(tmp_path):
     assert "--provenance-json" not in report["command"]["effective"]
     assert (tmp_path / "workspace" / "reproduction.json").exists()
     assert (tmp_path / "workspace" / "REPRODUCTION.md").exists()
+    assert any(
+        item["step"] == "fetch main branch"
+        and item["command"] == ["git", "fetch", "origin", "dev"]
+        for item in report["commands"]
+    )
 
 
 def test_reproduce_rebases_editable_dependency_paths(tmp_path):
