@@ -45,6 +45,16 @@ def _commit(repo: Path) -> str:
     ).stdout.strip()
 
 
+def _branch(repo: Path) -> str:
+    return subprocess.run(
+        ["git", "branch", "--show-current"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
 def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -245,6 +255,8 @@ def test_reproduce_preserves_editable_dependency_paths(tmp_path):
     pyproject_text = (tmp_path / "workspace" / "pyproject.toml").read_text()
     assert 'path = "../dep"' in pyproject_text
     assert "- pypi: ../dep" in (tmp_path / "workspace" / "pixi.lock").read_text()
+    assert _branch(dep_repo) == "dev"
+    assert not any(item["step"] == "checkout dep" for item in report["commands"])
     assert report["adaptations"] == [
         {
             "kind": "existing-editable-dependency",

@@ -296,7 +296,7 @@ def _clone_or_resume_repo(
     report: dict[str, Any],
     resume: bool,
     reuse_existing: bool = False,
-) -> None:
+) -> bool:
     name = _repo_name(state)
     source = _repo_source(state, sources)
     if not source:
@@ -316,6 +316,18 @@ def _clone_or_resume_repo(
                     "commit": commit,
                 }
             )
+            report["repos"].append(
+                {
+                    "name": name,
+                    "source": source,
+                    "path": str(destination),
+                    "commit": commit,
+                    "branch": _branch_name(state),
+                    "dirty": bool(state.get("dirty")),
+                    "reused_existing": True,
+                }
+            )
+            return False
         elif reuse_existing and commit and head != commit:
             raise ReproductionError(
                 f"Editable dependency path already exists at {destination}, "
@@ -365,6 +377,7 @@ def _clone_or_resume_repo(
             "dirty": bool(state.get("dirty")),
         }
     )
+    return True
 
 
 def _copy_artifact(
@@ -625,20 +638,21 @@ def reproduce_from_provenance(
     repos = record.get("software_repos") or []
     project = _select_project_repo(repos, project_repo)
     artifact_dir = workspace_path / "provenance-source"
-    _clone_or_resume_repo(
+    project_was_restored = _clone_or_resume_repo(
         state=project,
         destination=workspace_path,
         sources=repo_sources,
         report=report,
         resume=resume,
     )
-    _apply_patch_if_present(
-        state=project,
-        provenance_path=provenance_path,
-        repo_path=workspace_path,
-        artifact_dir=artifact_dir,
-        report=report,
-    )
+    if project_was_restored:
+        _apply_patch_if_present(
+            state=project,
+            provenance_path=provenance_path,
+            repo_path=workspace_path,
+            artifact_dir=artifact_dir,
+            report=report,
+        )
     _copy_artifact(provenance_path, artifact_dir, report, name="product provenance")
     _copy_artifact(
         sidecar if sidecar.exists() else None,
@@ -681,7 +695,7 @@ def reproduce_from_provenance(
                     "software_repos; using matching local checkout."
                 )
             destination = (workspace_path / str(local_path)).resolve()
-            _clone_or_resume_repo(
+            dependency_was_restored = _clone_or_resume_repo(
                 state=state,
                 destination=destination,
                 sources=repo_sources,
@@ -689,13 +703,14 @@ def reproduce_from_provenance(
                 resume=resume,
                 reuse_existing=True,
             )
-            _apply_patch_if_present(
-                state=state,
-                provenance_path=provenance_path,
-                repo_path=destination,
-                artifact_dir=artifact_dir,
-                report=report,
-            )
+            if dependency_was_restored:
+                _apply_patch_if_present(
+                    state=state,
+                    provenance_path=provenance_path,
+                    repo_path=destination,
+                    artifact_dir=artifact_dir,
+                    report=report,
+                )
 
     try:
         if strict and (report["warnings"] or report["blockers"]):
