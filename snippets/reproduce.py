@@ -213,7 +213,10 @@ def _repo_contains_commit(repo: Path, commit: str | None) -> bool:
 
 def _candidate_local_repos(name: str) -> list[Path]:
     cwd = Path.cwd().resolve()
-    candidates = [cwd, cwd.parent / name]
+    candidates = []
+    if cwd.name == name:
+        candidates.append(cwd)
+    candidates.append(cwd.parent / name)
     return list(dict.fromkeys(candidates))
 
 
@@ -226,6 +229,25 @@ def _matching_local_repo_source(state: dict[str, Any]) -> str | None:
         if not _repo_contains_commit(candidate, commit):
             continue
         return str(candidate)
+    return None
+
+
+def _local_repo_state(name: str) -> dict[str, Any] | None:
+    for candidate in _candidate_local_repos(name):
+        if not (candidate / ".git").exists():
+            continue
+        commit = _git_value(candidate, ["rev-parse", "HEAD"]) or None
+        branch = _git_value(candidate, ["branch", "--show-current"]) or None
+        status = _git_value(candidate, ["status", "--porcelain"])
+        return {
+            "name": name,
+            "commit": commit,
+            "branch": branch,
+            "remote_url": str(candidate),
+            "dirty": bool(status),
+            "status_short": status,
+            "not_in_provenance": True,
+        }
     return None
 
 
@@ -273,6 +295,7 @@ def _clone_or_resume_repo(
     sources: dict[str, str],
     report: dict[str, Any],
     resume: bool,
+    reuse_existing: bool = False,
 ) -> None:
     name = _repo_name(state)
     source = _repo_source(state, sources)
@@ -282,7 +305,25 @@ def _clone_or_resume_repo(
             f"provide --repo-source {name}=PATH_OR_URL."
         )
     if destination.exists():
-        if not resume:
+        commit = state.get("commit")
+        head = _git_value(destination, ["rev-parse", "HEAD"]) or None
+        if reuse_existing and (not commit or head == commit):
+            report["adaptations"].append(
+                {
+                    "kind": "existing-editable-dependency",
+                    "repo": name,
+                    "path": str(destination),
+                    "commit": commit,
+                }
+            )
+        elif reuse_existing and commit and head != commit:
+            raise ReproductionError(
+                f"Editable dependency path already exists at {destination}, "
+                f"but HEAD is {head} instead of recorded commit {commit}. "
+                "Use a workspace in a fresh parent directory or reproduce with "
+                "a production Pixi environment."
+            )
+        elif not resume:
             raise ReproductionError(
                 f"Repository destination already exists: {destination}"
             )
@@ -399,44 +440,6 @@ def _load_environment_summary(path: Path | None) -> dict[str, Any]:
     if path is None or not path.exists():
         return {}
     return load_json(path)
-
-
-def _rebase_editable_paths(
-    *,
-    project_root: Path,
-    lock_path: Path,
-    local_paths: list[str],
-    report: dict[str, Any],
-) -> None:
-    manifest = project_root / "pyproject.toml"
-    replacements = {}
-    for item in local_paths:
-        if not item.startswith("../"):
-            continue
-        name = Path(item).name
-        replacements[item] = f"repos/{name}"
-
-    for target in (manifest, lock_path):
-        if not target.exists():
-            continue
-        original = target.read_text(encoding="utf-8")
-        updated = original
-        for old, new in replacements.items():
-            updated = updated.replace(old, new)
-        if updated == original:
-            continue
-        before = hashlib.sha256(original.encode("utf-8")).hexdigest()
-        target.write_text(updated, encoding="utf-8")
-        after = hashlib.sha256(updated.encode("utf-8")).hexdigest()
-        report["adaptations"].append(
-            {
-                "kind": "editable-path-rebase",
-                "path": str(target),
-                "original_sha256": before,
-                "rebased_sha256": after,
-                "replacements": replacements,
-            }
-        )
 
 
 def _verify_input_provenance(
@@ -666,17 +669,25 @@ def reproduce_from_provenance(
             name = Path(local_path).name
             state = repo_by_name.get(name)
             if state is None:
+                state = _local_repo_state(name)
+                if state is None:
+                    report["blockers"].append(
+                        f"Editable dependency {name!r} not found in software_repos "
+                        "and no matching local checkout was found."
+                    )
+                    continue
                 report["warnings"].append(
-                    f"Editable dependency {name!r} not found in software_repos."
+                    f"Editable dependency {name!r} was not tracked in "
+                    "software_repos; using matching local checkout."
                 )
-                continue
-            destination = workspace_path / "repos" / name
+            destination = (workspace_path / str(local_path)).resolve()
             _clone_or_resume_repo(
                 state=state,
                 destination=destination,
                 sources=repo_sources,
                 report=report,
                 resume=resume,
+                reuse_existing=True,
             )
             _apply_patch_if_present(
                 state=state,
@@ -685,34 +696,41 @@ def reproduce_from_provenance(
                 artifact_dir=artifact_dir,
                 report=report,
             )
-        _rebase_editable_paths(
-            project_root=workspace_path,
-            lock_path=workspace_path / "pixi.lock",
-            local_paths=list(local_paths),
-            report=report,
-        )
 
-    if strict and (report["warnings"] or report["blockers"]):
-        report["status"] = "failed_strict"
-    elif report["blockers"]:
-        report["status"] = "blocked"
-    else:
-        if install:
-            _run(
-                ["pixi", "install", "--locked", "-e", str(env_name)],
-                cwd=workspace_path,
-                report=report,
-                step="pixi install",
-            )
-        if execute:
-            proc = _run(
-                ["pixi", "run", "-e", str(env_name), *report["command"]["effective"]],
-                cwd=workspace_path,
-                report=report,
-                step="execute command",
-            )
-            report["execution"] = {"returncode": proc.returncode}
-        report["status"] = "completed"
+    try:
+        if strict and (report["warnings"] or report["blockers"]):
+            report["status"] = "failed_strict"
+        elif report["blockers"]:
+            report["status"] = "blocked"
+        else:
+            if install:
+                _run(
+                    ["pixi", "install", "--locked", "-e", str(env_name)],
+                    cwd=workspace_path,
+                    report=report,
+                    step="pixi install",
+                )
+            if execute:
+                proc = _run(
+                    [
+                        "pixi",
+                        "run",
+                        "-e",
+                        str(env_name),
+                        *report["command"]["effective"],
+                    ],
+                    cwd=workspace_path,
+                    report=report,
+                    step="execute command",
+                )
+                report["execution"] = {"returncode": proc.returncode}
+            report["status"] = "completed"
+    except Exception as err:
+        report["status"] = "failed"
+        report["blockers"].append(str(err))
+        write_json(workspace_path / "reproduction.json", report)
+        _write_markdown_report(workspace_path / "REPRODUCTION.md", report)
+        raise
 
     write_json(workspace_path / "reproduction.json", report)
     _write_markdown_report(workspace_path / "REPRODUCTION.md", report)

@@ -204,7 +204,7 @@ def test_reproduce_prefers_matching_local_checkout(tmp_path, monkeypatch):
     assert report["repos"][0]["source"] == str(main_repo)
 
 
-def test_reproduce_rebases_editable_dependency_paths(tmp_path):
+def test_reproduce_preserves_editable_dependency_paths(tmp_path):
     main_repo = _git_repo(
         tmp_path,
         "main",
@@ -241,11 +241,58 @@ def test_reproduce_rebases_editable_dependency_paths(tmp_path):
 
     assert report["status"] == "completed"
     assert report["environment"]["mode"] == "editable-local"
-    assert (tmp_path / "workspace" / "repos" / "dep" / ".git").exists()
+    assert (tmp_path / "dep" / ".git").exists()
     pyproject_text = (tmp_path / "workspace" / "pyproject.toml").read_text()
-    assert 'path = "repos/dep"' in pyproject_text
-    assert "- pypi: repos/dep" in (tmp_path / "workspace" / "pixi.lock").read_text()
-    assert report["adaptations"]
+    assert 'path = "../dep"' in pyproject_text
+    assert "- pypi: ../dep" in (tmp_path / "workspace" / "pixi.lock").read_text()
+    assert report["adaptations"] == [
+        {
+            "kind": "existing-editable-dependency",
+            "repo": "dep",
+            "path": str(tmp_path / "dep"),
+            "commit": _commit(dep_repo),
+        }
+    ]
+
+
+def test_reproduce_uses_untracked_local_editable_dependency(tmp_path, monkeypatch):
+    main_repo = _git_repo(
+        tmp_path,
+        "main",
+        files={
+            "pyproject.toml": (
+                "[tool.pixi.feature.utils-local.pypi-dependencies]\n"
+                'dep = { path = "../dep", editable = true }\n'
+            )
+        },
+    )
+    dep_repo = _git_repo(tmp_path, "dep")
+    provenance = _write_provenance(
+        tmp_path / "run",
+        main_repo=main_repo,
+        env_name="downscale-local",
+        editable=True,
+        lock_text=(
+            "version: 6\n"
+            "environments:\n"
+            "  downscale-local:\n"
+            "    packages:\n"
+            "      linux-64:\n"
+            "      - pypi: ../dep\n"
+        ),
+    )
+    monkeypatch.chdir(main_repo)
+
+    report = reproduce_from_provenance(
+        provenance=provenance,
+        workspace=tmp_path / "workspace",
+        install=False,
+    )
+
+    assert report["status"] == "completed"
+    assert (tmp_path / "dep" / ".git").exists()
+    assert report["repos"][1]["source"] == str(dep_repo)
+    assert any("not tracked in software_repos" in item for item in report["warnings"])
 
 
 def test_reproduce_existing_workspace_requires_resume_or_force(tmp_path):
