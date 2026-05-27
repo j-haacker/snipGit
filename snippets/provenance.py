@@ -218,13 +218,16 @@ def get_git_state(
     diff_hash = None
     if include_diff_hash and dirty:
         _, staged, _ = run_git(
-            ["diff", "--cached", "--no-ext-diff", "--"], cwd=repo_root
+            ["diff", "--cached", "--binary", "--no-ext-diff", "--"], cwd=repo_root
         )
-        _, unstaged, _ = run_git(["diff", "--no-ext-diff", "--"], cwd=repo_root)
-        diff_payload = f"{status_output}\n{staged}\n{unstaged}"
-        diff_hash = hashlib.sha256(
-            diff_payload.encode("utf-8", errors="replace")
-        ).hexdigest()
+        _, unstaged, _ = run_git(
+            ["diff", "--binary", "--no-ext-diff", "--"], cwd=repo_root
+        )
+        diff_payload = f"{staged}{unstaged}"
+        if diff_payload:
+            diff_hash = hashlib.sha256(
+                diff_payload.encode("utf-8", errors="replace")
+            ).hexdigest()
 
     return GitState(
         repo_root=repo_root,
@@ -288,6 +291,10 @@ def public_git_state(state: GitState | Mapping[str, Any]) -> dict[str, Any]:
             result["diff_hash"] = data.get("diff_hash") or data.get("git_diff_hash")
         if data.get("status_short"):
             result["status_short"] = data.get("status_short")
+        if data.get("untracked_files"):
+            result["untracked_files"] = data.get("untracked_files")
+        if data.get("patch"):
+            result["patch"] = data.get("patch")
     return {key: value for key, value in result.items() if value not in (None, "")}
 
 
@@ -324,6 +331,10 @@ def public_input_path_state(
     public_metadata: dict[str, Any] = {}
     if metadata.get("directory"):
         public_metadata["directory"] = metadata["directory"]
+    if metadata.get("selection"):
+        public_metadata["selection"] = metadata["selection"]
+    if metadata.get("product_provenance"):
+        public_metadata["product_provenance"] = metadata["product_provenance"]
     lfs = metadata.get("lfs") or {}
     if lfs.get("tracked_by_lfs") or lfs.get("is_pointer_file"):
         public_metadata["lfs"] = {
@@ -451,7 +462,7 @@ def _simple_dvc_outputs(text: str) -> list[dict[str, Any]]:
         key, value = line.split(":", 1)
         key = key.strip()
         value = value.strip().strip('"\'')
-        if key in {"path", "md5", "hash", "etag", "size"}:
+        if key in {"path", "md5", "hash", "etag", "size", "nfiles"}:
             current[key] = value
     if current:
         outputs.append(current)

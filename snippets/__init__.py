@@ -13,6 +13,7 @@ __all__ = [
     "parallel",
     "xr_utils",
     "provenance",
+    "reproduce",
 ]
 
 from contextlib import contextmanager
