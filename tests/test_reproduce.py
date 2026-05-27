@@ -67,6 +67,8 @@ def _write_provenance(
     lock_text: str,
     editable: bool = False,
     dep_repo: Path | None = None,
+    dep_path: str = "../dep",
+    legacy_editable: bool = False,
 ) -> Path:
     env_dir = run_root / "provenance" / "environment"
     product_dir = run_root / "factors" / "hurs"
@@ -75,20 +77,28 @@ def _write_provenance(
     lock = env_dir / "pixi.lock"
     summary = env_dir / "environment.json"
     lock.write_text(lock_text, encoding="utf-8")
-    local_paths = ["../dep"] if editable else []
+    local_paths = [dep_path] if editable else []
+    pixi = {
+        "environment": env_name,
+        "editable_dependencies": editable,
+        "local_path_dependencies": local_paths,
+    }
+    if editable and not legacy_editable:
+        dependency = {
+            "path": dep_path,
+            "package": "dep",
+            "repo": "dep",
+            "kind": "external-editable",
+            "local": True,
+            "editable": True,
+        }
+        pixi["local_dependencies"] = [dependency]
+        pixi["external_editable_dependencies"] = [dependency]
+    summary_payload = {"pixi": pixi}
+    if not legacy_editable:
+        summary_payload["schema_version"] = "2"
     summary.write_text(
-        json.dumps(
-            {
-                "pixi": {
-                    "environment": env_name,
-                    "editable_dependencies": editable,
-                    "local_path_dependencies": local_paths,
-                }
-            },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
+        json.dumps(summary_payload, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
     repos = [
@@ -172,9 +182,12 @@ def test_reproduce_sets_up_production_workspace_without_editable_deps(tmp_path):
 
     assert report["status"] == "completed"
     assert report["environment"]["mode"] == "production"
-    assert (tmp_path / "workspace" / "repos" / "main" / ".git").exists()
-    assert (tmp_path / "workspace" / "repos" / "main" / "pixi.lock").read_text() == (
+    assert (tmp_path / "workspace" / ".git").exists()
+    assert (tmp_path / "workspace" / "pixi.lock").read_text() == (
         tmp_path / "run" / "provenance" / "environment" / "pixi.lock"
+    ).read_text()
+    assert "repos/" in (
+        tmp_path / "workspace" / ".git" / "info" / "exclude"
     ).read_text()
     assert "--provenance-json" not in report["command"]["effective"]
     assert (tmp_path / "workspace" / "reproduction.json").exists()
@@ -296,19 +309,17 @@ def test_reproduce_preserves_editable_dependency_paths(tmp_path):
     assert report["status"] == "completed"
     assert report["environment"]["mode"] == "editable-local"
     assert (tmp_path / "workspace" / "repos" / "dep" / ".git").exists()
-    pyproject_text = (
-        tmp_path / "workspace" / "repos" / "main" / "pyproject.toml"
-    ).read_text()
-    assert 'path = "../dep"' in pyproject_text
-    assert "- pypi: ../dep" in (
-        tmp_path / "workspace" / "repos" / "main" / "pixi.lock"
-    ).read_text()
+    pyproject_text = (tmp_path / "workspace" / "pyproject.toml").read_text()
+    assert 'path = "repos/dep"' in pyproject_text
+    assert "- pypi: repos/dep" in (tmp_path / "workspace" / "pixi.lock").read_text()
     assert _branch(dep_repo) == "dev"
     assert not any(item["cwd"] == str(dep_repo) for item in report["commands"])
-    assert not report["adaptations"]
+    assert any(
+        item["kind"] == "editable-path-rewrite" for item in report["adaptations"]
+    )
 
 
-def test_reproduce_uses_untracked_local_editable_dependency(tmp_path, monkeypatch):
+def test_reproduce_blocks_missing_editable_dependency_provenance(tmp_path, monkeypatch):
     main_repo = _git_repo(
         tmp_path,
         "main",
@@ -342,10 +353,84 @@ def test_reproduce_uses_untracked_local_editable_dependency(tmp_path, monkeypatc
         install=False,
     )
 
+    assert report["status"] == "blocked"
+    assert not (tmp_path / "workspace" / "repos" / "dep" / ".git").exists()
+    assert report["blockers"] == [
+        "Editable dependency 'dep' is missing from software_repos."
+    ]
+
+
+def test_reproduce_rewrites_absolute_editable_dependency_path(tmp_path):
+    dep_repo = _git_repo(tmp_path, "dep")
+    main_repo = _git_repo(
+        tmp_path,
+        "main",
+        files={
+            "pyproject.toml": (
+                "[tool.pixi.feature.utils-local.pypi-dependencies]\n"
+                f'dep = {{ path = "{dep_repo}", editable = true }}\n'
+            )
+        },
+    )
+    lock_text = (
+        "version: 6\n"
+        "environments:\n"
+        "  downscale-local:\n"
+        "    packages:\n"
+        "      linux-64:\n"
+        f"      - pypi: {dep_repo}\n"
+    )
+    provenance = _write_provenance(
+        tmp_path / "run",
+        main_repo=main_repo,
+        dep_repo=dep_repo,
+        env_name="downscale-local",
+        editable=True,
+        dep_path=str(dep_repo),
+        lock_text=lock_text,
+    )
+
+    report = reproduce_from_provenance(
+        provenance=provenance,
+        workspace=tmp_path / "workspace",
+        install=False,
+    )
+
     assert report["status"] == "completed"
-    assert (tmp_path / "workspace" / "repos" / "dep" / ".git").exists()
-    assert report["repos"][1]["source"] == str(dep_repo)
-    assert any("not tracked in software_repos" in item for item in report["warnings"])
+    assert f'path = "{dep_repo}"' not in (
+        tmp_path / "workspace" / "pyproject.toml"
+    ).read_text()
+    assert 'path = "repos/dep"' in (tmp_path / "workspace" / "pyproject.toml").read_text()
+    assert f"- pypi: {dep_repo}" not in (tmp_path / "workspace" / "pixi.lock").read_text()
+    assert "- pypi: repos/dep" in (tmp_path / "workspace" / "pixi.lock").read_text()
+
+
+def test_reproduce_rejects_legacy_editable_environment_schema(tmp_path):
+    main_repo = _git_repo(tmp_path, "main")
+    dep_repo = _git_repo(tmp_path, "dep")
+    provenance = _write_provenance(
+        tmp_path / "run",
+        main_repo=main_repo,
+        dep_repo=dep_repo,
+        env_name="downscale-local",
+        editable=True,
+        legacy_editable=True,
+        lock_text=(
+            "version: 6\n"
+            "environments:\n"
+            "  downscale-local:\n"
+            "    packages:\n"
+            "      linux-64:\n"
+            "      - pypi: ../dep\n"
+        ),
+    )
+
+    with pytest.raises(ReproductionError, match="environment schema v2"):
+        reproduce_from_provenance(
+            provenance=provenance,
+            workspace=tmp_path / "workspace",
+            install=False,
+        )
 
 
 def test_reproduce_existing_workspace_requires_resume_or_force(tmp_path):

@@ -26,6 +26,10 @@ def sha256_file(path: str | Path) -> str:
     return digest.hexdigest()
 
 
+def sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 def load_json(path: str | Path) -> dict[str, Any]:
     with Path(path).open(encoding="utf-8") as handle:
         return json.load(handle)
@@ -293,6 +297,22 @@ def _local_repo_state(name: str) -> dict[str, Any] | None:
     return None
 
 
+def _exclude_reproduction_artifacts(project_path: Path) -> None:
+    exclude = project_path / ".git" / "info" / "exclude"
+    if not exclude.exists():
+        return
+    additions = ["repos/", "provenance-source/", "reproduction.json", "REPRODUCTION.md"]
+    existing = set(exclude.read_text(encoding="utf-8").splitlines())
+    missing = [item for item in additions if item not in existing]
+    if not missing:
+        return
+    with exclude.open("a", encoding="utf-8") as handle:
+        if existing and "" not in existing:
+            handle.write("\n")
+        for item in missing:
+            handle.write(f"{item}\n")
+
+
 def _branch_name(state: dict[str, Any]) -> str | None:
     branch = state.get("branch")
     if not branch or branch == "detached":
@@ -497,6 +517,83 @@ def _load_environment_summary(path: Path | None) -> dict[str, Any]:
     return load_json(path)
 
 
+def _is_project_self_dependency(path: str) -> bool:
+    normalized = path.rstrip("/") or "."
+    return normalized in {".", "./"}
+
+
+def _external_editable_dependencies(
+    *, summary: dict[str, Any], pixi: dict[str, Any], lock_text: str, env_name: str
+) -> tuple[list[dict[str, Any]], list[str]]:
+    local_records = pixi.get("local_dependencies")
+    if local_records is not None:
+        external = [
+            dict(record)
+            for record in local_records
+            if record.get("kind") == "external-editable"
+        ]
+        local_paths = [str(record.get("path")) for record in local_records]
+        return external, local_paths
+
+    local_paths = pixi.get("local_path_dependencies")
+    if local_paths is None:
+        local_paths = pixi_local_path_dependencies(lock_text, env_name)
+    local_paths = [str(path) for path in local_paths]
+    has_external = any(not _is_project_self_dependency(path) for path in local_paths)
+    editable = bool(pixi.get("editable_dependencies", has_external))
+    if editable and has_external:
+        schema = summary.get("schema_version") or "unknown"
+        raise ReproductionError(
+            "Editable-local provenance requires environment schema v2 with "
+            f"detailed local dependency records; found schema {schema}. "
+            "Regenerate the product provenance."
+        )
+    return [], local_paths
+
+
+def _replace_path_token(text: str, old: str, new: str) -> str:
+    replacements = {
+        old: new,
+        f'"{old}"': f'"{new}"',
+        f"'{old}'": f"'{new}'",
+    }
+    for source, target in sorted(replacements.items(), key=lambda item: -len(item[0])):
+        text = text.replace(source, target)
+    return text
+
+
+def _rewrite_editable_paths(
+    *,
+    project_path: Path,
+    replacements: dict[str, str],
+    report: dict[str, Any],
+) -> None:
+    if not replacements:
+        return
+    for path in [project_path / "pyproject.toml", project_path / "pixi.lock"]:
+        if not path.exists():
+            continue
+        old_text = path.read_text(encoding="utf-8")
+        new_text = old_text
+        for old, new in replacements.items():
+            new_text = _replace_path_token(new_text, old, new)
+        if new_text == old_text:
+            continue
+        path.write_text(new_text, encoding="utf-8")
+        report["adaptations"].append(
+            {
+                "kind": "editable-path-rewrite",
+                "path": str(path),
+                "old_sha256": sha256_text(old_text),
+                "new_sha256": sha256_text(new_text),
+                "replacements": [
+                    {"old": old, "new": new}
+                    for old, new in sorted(replacements.items())
+                ],
+            }
+        )
+
+
 def _verify_input_provenance(
     *,
     record: dict[str, Any],
@@ -663,15 +760,19 @@ def reproduce_from_provenance(
         )
 
     lock_text = lock_source.read_text(encoding="utf-8") if lock_source else ""
-    local_paths = pixi.get("local_path_dependencies")
-    if local_paths is None:
-        local_paths = pixi_local_path_dependencies(lock_text, env_name)
-    editable = bool(pixi.get("editable_dependencies", bool(local_paths)))
+    external_dependencies, local_paths = _external_editable_dependencies(
+        summary=summary,
+        pixi=pixi,
+        lock_text=lock_text,
+        env_name=env_name,
+    )
+    editable = bool(external_dependencies)
     report["environment"] = {
         "name": env_name,
         "mode": "editable-local" if editable else "production",
         "editable_dependencies": editable,
         "local_path_dependencies": local_paths,
+        "external_editable_dependencies": external_dependencies,
     }
 
     _verify_input_provenance(
@@ -691,7 +792,7 @@ def reproduce_from_provenance(
     repos = record.get("software_repos") or []
     project = _select_project_repo(repos, project_repo)
     repo_root = workspace_path / "repos"
-    project_path = repo_root / _repo_name(project)
+    project_path = workspace_path
     report["project_repo_path"] = str(project_path)
     artifact_dir = workspace_path / "provenance-source"
     project_was_restored = _clone_or_resume_repo(
@@ -709,6 +810,7 @@ def reproduce_from_provenance(
             artifact_dir=artifact_dir,
             report=report,
         )
+    _exclude_reproduction_artifacts(project_path)
     _copy_artifact(provenance_path, artifact_dir, report, name="product provenance")
     _copy_artifact(
         sidecar if sidecar.exists() else None,
@@ -733,24 +835,18 @@ def reproduce_from_provenance(
 
     repo_by_name = {_repo_name(state): state for state in repos}
     if editable:
-        for local_path in local_paths:
-            if not str(local_path).startswith("../"):
-                continue
-            name = Path(local_path).name
+        path_rewrites: dict[str, str] = {}
+        for dependency in external_dependencies:
+            local_path = str(dependency.get("path") or "")
+            name = str(dependency.get("repo") or Path(local_path).name)
             state = repo_by_name.get(name)
             if state is None:
-                state = _local_repo_state(name)
-                if state is None:
-                    report["blockers"].append(
-                        f"Editable dependency {name!r} not found in software_repos "
-                        "and no matching local checkout was found."
-                    )
-                    continue
-                report["warnings"].append(
-                    f"Editable dependency {name!r} was not tracked in "
-                    "software_repos; using matching local checkout."
+                report["blockers"].append(
+                    f"Editable dependency {name!r} is missing from software_repos."
                 )
-            destination = (project_path / str(local_path)).resolve()
+                continue
+            destination = repo_root / name
+            path_rewrites[local_path] = f"repos/{name}"
             dependency_was_restored = _clone_or_resume_repo(
                 state=state,
                 destination=destination,
@@ -767,6 +863,11 @@ def reproduce_from_provenance(
                     artifact_dir=artifact_dir,
                     report=report,
                 )
+        _rewrite_editable_paths(
+            project_path=project_path,
+            replacements=path_rewrites,
+            report=report,
+        )
 
     try:
         if strict and (report["warnings"] or report["blockers"]):
