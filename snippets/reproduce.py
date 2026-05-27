@@ -570,28 +570,36 @@ def _rewrite_editable_paths(
 ) -> None:
     if not replacements:
         return
-    for path in [project_path / "pyproject.toml", project_path / "pixi.lock"]:
-        if not path.exists():
-            continue
-        old_text = path.read_text(encoding="utf-8")
-        new_text = old_text
-        for old, new in replacements.items():
-            new_text = _replace_path_token(new_text, old, new)
-        if new_text == old_text:
-            continue
-        path.write_text(new_text, encoding="utf-8")
-        report["adaptations"].append(
-            {
-                "kind": "editable-path-rewrite",
-                "path": str(path),
-                "old_sha256": sha256_text(old_text),
-                "new_sha256": sha256_text(new_text),
-                "replacements": [
-                    {"old": old, "new": new}
-                    for old, new in sorted(replacements.items())
-                ],
-            }
+    pyproject_path = project_path / "pyproject.toml"
+    if not pyproject_path.exists():
+        raise ReproductionError(
+            "Reproduction from editable sources needs pyproject.toml."
         )
+    old_text = pyproject_path.read_text(encoding="utf-8")
+    new_text = old_text
+    for old, new in replacements.items():
+        new_text = _replace_path_token(new_text, old, new)
+    if new_text == old_text:
+        return
+    pyproject_path.write_text(new_text, encoding="utf-8")
+    report["adaptations"].append(
+        {
+            "kind": "editable-path-rewrite",
+            "path": str(pyproject_path),
+            "old_sha256": sha256_text(old_text),
+            "new_sha256": sha256_text(new_text),
+            "replacements": [
+                {"old": old, "new": new}
+                for old, new in sorted(replacements.items())
+            ],
+        }
+    )
+    _run(
+        ["pixi", "lock"],
+        cwd=project_path,
+        report=report,
+        step="pixi lock",
+    )
 
 
 def _verify_input_provenance(
