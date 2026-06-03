@@ -1,8 +1,8 @@
 # snippets
 
 `snippets` is a personal Python utility package. The documentation focuses on
-the stable helpers that are useful to reuse, especially the provenance tools for
-recording software state, input state, and CF/xarray history metadata.
+the stable helpers that are useful to reuse. Provenance and reproduction helpers
+now live in the standalone `reprotrail` package.
 
 ```{toctree}
 :maxdepth: 2

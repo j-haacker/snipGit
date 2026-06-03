@@ -1,13 +1,6 @@
 API reference
 =============
 
-Provenance
-----------
-
-.. automodule:: snippets.provenance
-   :members:
-   :show-inheritance:
-
 Monitoring
 ----------
 
@@ -48,5 +41,5 @@ Package helpers
 
 .. automodule:: snippets
    :members:
-   :exclude-members: debugging, monkeypatch, monitoring, parallel, provenance, xr_utils
+   :exclude-members: debugging, monkeypatch, monitoring, parallel, xr_utils
    :show-inheritance:

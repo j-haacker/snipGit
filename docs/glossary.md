@@ -1,5 +1,8 @@
 # Glossary
 
+The provenance terms below are kept for readers of older `snippets` workflows.
+The active provenance and reproduction implementation is now `reprotrail`.
+
 Backend
 : The storage or tracking system responsible for an input path. Supported
   values are `dvc`, `git-lfs`, `git`, `filesystem`, and `unknown`.
